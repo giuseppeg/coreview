@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync } from 'node:child_process'
+import * as readline from 'node:readline'
 import { parseDiff, enrichDiff, countDiffLines } from './diff'
 import { createStreamParser, resolveReference } from './stream'
 import { createClaudeCodeProvider, SYSTEM_PROMPT } from './llm'
@@ -8,14 +9,24 @@ import { renderReference } from './render'
 
 const MAX_DIFF_LINES = 4000
 
-function parseArgs(): string | null {
+type CliArgs = {
+  target: string | null
+  paged: boolean
+}
+
+function parseArgs(): CliArgs {
   const args = process.argv.slice(2)
+  let paged = false
 
   for (const arg of args) {
     if (arg === '--help' || arg === '-h') {
       console.log(`coreview - semantic code review tool
 
-Usage: coreview [target]
+Usage: coreview [options] [target]
+
+Options:
+  -p          Paged mode - pause after each code reference
+  -h, --help  Show this help
 
 Target:
   branch name, commit hash, or commit range (e.g., main..HEAD)
@@ -23,14 +34,36 @@ Target:
 
 Examples:
   coreview              # review local changes vs HEAD
-  coreview main         # review changes since main
+  coreview -p main      # paged review of changes since main
   coreview abc123       # review changes since commit
   coreview main..HEAD   # explicit range`)
       process.exit(0)
     }
+    if (arg === '-p') {
+      paged = true
+    }
   }
 
-  return args.find(a => !a.startsWith('-')) ?? null
+  const target = args.find(a => !a.startsWith('-')) ?? null
+  return { target, paged }
+}
+
+function waitForEnter(p: { files: string[] }): Promise<void> {
+  return new Promise(resolve => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    })
+    const fileList = p.files.length ? `\x1b[2m[ ${p.files.join(' | ')} ]\x1b[0m\n` : ''
+    process.stdout.write(`\n${fileList}\x1b[2m[ENTER to continue]\x1b[0m`)
+    rl.once('line', () => {
+      rl.close()
+      // Move cursor up and clear lines to remove prompt
+      const lines = p.files.length ? 2 : 1
+      process.stdout.write(`\x1b[${lines}A\x1b[J`)
+      resolve()
+    })
+  })
 }
 
 function getDiffCommand(target: string | null): string {
@@ -38,7 +71,7 @@ function getDiffCommand(target: string | null): string {
 }
 
 async function main() {
-  const target = parseArgs()
+  const { target, paged } = parseArgs()
   const diffCmd = getDiffCommand(target)
   console.log('\n±coreview\n');
 
@@ -77,37 +110,66 @@ async function main() {
   const parser = createStreamParser()
 
   console.log("Analyzing changes...");
-  let started = false;
+  let started = false
 
-  // Stream response and expand references
-  for await (const chunk of llm.stream({
-    systemPrompt: SYSTEM_PROMPT,
-    userPrompt: 'Explain this diff:',
-    input: enriched
-  })) {
-    if (!started) {
-      started = true;
-      console.log("\nReview:\n")
-    }
-    const tokens = parser.push(chunk)
-    for (const token of tokens) {
-      if (token.type === 'text') {
-        process.stdout.write(token.content)
-      } else {
-        const resolved = resolveReference({ ref: token.content, diff })
-        process.stdout.write(renderReference({ resolved }))
-      }
-    }
+  function render(token: { type: 'text' | 'ref'; content: string }): string {
+    if (token.type === 'text') return token.content
+    return renderReference({ resolved: resolveReference({ ref: token.content, diff }) })
   }
 
-  // Flush remaining
-  for (const token of parser.flush()) {
-    if (token.type === 'text') {
-      process.stdout.write(token.content)
-    } else {
-      const resolved = resolveReference({ ref: token.content, diff })
-      process.stdout.write(renderReference({ resolved }))
+  const streamArgs = { systemPrompt: SYSTEM_PROMPT, userPrompt: 'Explain this diff:', input: enriched }
+
+  if (paged) {
+    // Paged mode: stream into blocks, pause at ref boundaries
+    // - Background task consumes LLM stream, splits into blocks at each [[ref:...]]
+    // - Foreground loop prints blocks incrementally, waits for ENTER between them
+    // - This avoids Anthropic timeout: LLM streams continuously into memory
+
+    type Block = { content: string; files: Set<string> }
+    const blocks: Block[] = [{ content: '', files: new Set() }]
+    let done = false
+
+    // Background: consume stream, chunk into blocks
+    // Split when non-whitespace text appears after a ref (contiguous refs stay together)
+    let sawRef = false
+    const build = (async () => {
+      for await (const chunk of llm.stream(streamArgs)) {
+        if (!started) { started = true; console.log("\nReview:\n") }
+        for (const token of parser.push(chunk)) {
+          if (token.type === 'ref') {
+            sawRef = true
+            blocks[blocks.length - 1].files.add(token.file)
+          } else if (sawRef && token.content.trim()) {
+            blocks.push({ content: '', files: new Set() })
+            sawRef = false
+          }
+          blocks[blocks.length - 1].content += render(token)
+        }
+      }
+      for (const token of parser.flush()) blocks[blocks.length - 1].content += render(token)
+      done = true
+    })()
+
+    // Foreground: print blocks as they fill, pause between them
+    let i = 0, c = 0  // i = current block index, c = chars printed from current block
+    while (!done || i < blocks.length) {
+      const b = blocks[i] ?? { content: '', files: new Set() }
+      if (c < b.content.length) { process.stdout.write(b.content.slice(c)); c = b.content.length }
+      if (i < blocks.length - 1) {
+        await waitForEnter({ files: [...blocks[i].files] })
+        process.stdout.write('\x1b[2m' + '─'.repeat(60) + '\x1b[0m\n\n')
+        i++; c = 0
+      }
+      else if (done) break
+      else await new Promise(r => setTimeout(r, 16))
     }
+    await build
+  } else {
+    for await (const chunk of llm.stream(streamArgs)) {
+      if (!started) { started = true; console.log("\nReview:\n") }
+      for (const token of parser.push(chunk)) process.stdout.write(render(token))
+    }
+    for (const token of parser.flush()) process.stdout.write(render(token))
   }
 
   console.log('\n')

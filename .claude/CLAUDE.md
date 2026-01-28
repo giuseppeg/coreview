@@ -8,6 +8,14 @@ CLI that explains diffs semantically. Parses git diff into numbered hunks, sends
 2. LLM generates prose with `[[ref:filepath:hunk:N]]` references
 3. Stream parser detects refs, resolver maps to hunks, render with ANSI colors
 
+## Paged Mode (`-p`)
+
+When `-p` flag is passed:
+- Background task streams LLM response into blocks (split on ref boundaries)
+- Foreground prints blocks incrementally, pauses after each ref group
+- Shows referenced files before ENTER prompt: `[ file1 | file2 ]`
+- Contiguous refs (only whitespace between) stay in same block
+
 ## Reference Format
 
 ```

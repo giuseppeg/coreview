@@ -23,7 +23,7 @@ export type ResolvedReference =
 
 export type StreamToken =
   | { type: 'text'; content: string }
-  | { type: 'ref'; content: string }
+  | { type: 'ref'; content: string; file: string }
 
 export type LLMProvider = {
   stream(p: {

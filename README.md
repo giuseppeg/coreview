@@ -2,29 +2,33 @@
 
 Semantic code review tool that generates streaming narrative explanations of diffs with inline code references.
 
-## Install
-
-```bash
-npm install
-npm run build
-npm link  # optional, for global `coreview` command
-```
-
 ## Usage
 
 ```bash
-coreview [target]
+coreview [options] [target]
 ```
+
+**Options:**
+- `-p` Paged mode - pause after each code reference block for step-by-step review
 
 **Target:** branch name, commit hash, or commit range. Omit to review all local changes (staged + unstaged).
 
 **Examples:**
 ```bash
 coreview              # all local changes vs HEAD
-coreview main         # changes since main
+coreview -p main      # paged review of changes since main
 coreview abc123       # changes since commit
 coreview main..HEAD   # explicit range
 ```
+
+### Paged Mode (`-p`)
+
+In paged mode, the review pauses after each code block. You'll see:
+- The explanation text followed by the diff snippet(s)
+- A list of referenced files: `[ src/cli.ts | src/llm.ts ]`
+- Press ENTER to continue to the next section
+
+This allows you to read at your own pace and open referenced files as you go.
 
 ## How it works
 

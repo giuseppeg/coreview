@@ -44,7 +44,8 @@ export function createStreamParser(): {
         if (refEnd !== -1) {
           // Complete ref found
           const refContent = buffer.slice(REF_START.length, refEnd)
-          tokens.push({ type: 'ref', content: refContent })
+          const file = refContent.split(':hunk:')[0]
+          tokens.push({ type: 'ref', content: refContent, file })
           buffer = buffer.slice(refEnd + REF_END.length)
           inRef = false
         } else if (buffer.length > MAX_REF_LENGTH) {
