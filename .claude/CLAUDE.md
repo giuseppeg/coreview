@@ -6,7 +6,7 @@ CLI that explains diffs semantically. Parses git diff into numbered hunks, sends
 
 1. Parse diff -> `Map<filepath, Hunk[]>` with `[hunk:N]` markers
 2. LLM generates prose with `[[ref:filepath:hunk:N]]` references
-3. Stream parser detects refs, resolver maps to hunks, render with ANSI colors
+3. Stream parser detects refs, resolver maps to hunks, render (ANSI or markdown)
 
 ## Paged Mode (`-p`)
 
@@ -15,6 +15,16 @@ When `-p` flag is passed:
 - Foreground prints blocks incrementally, pauses after each ref group
 - Shows referenced files before ENTER prompt: `[ file1 | file2 ]`
 - Contiguous refs (only whitespace between) stay in same block
+- Not compatible with raw mode
+
+## Raw Mode (`--raw`)
+
+Outputs markdown without ANSI colors. Auto-enabled when stdout is not a TTY (piped to file).
+
+- No banner/status logs, just LLM prose + diff blocks
+- Diffs rendered as ` ```diff filename ` fenced blocks
+- Warnings as blockquotes: `> [warning: ...]`
+- Use: `coreview main > review.md`
 
 ## Reference Format
 

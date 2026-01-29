@@ -10,6 +10,7 @@ coreview [options] [target]
 
 **Options:**
 - `-p` Paged mode - pause after each code reference block for step-by-step review
+- `--raw` Output markdown without colors (auto-enabled when piped)
 
 **Target:** branch name, commit hash, or commit range. Omit to review all local changes (staged + unstaged).
 
@@ -18,7 +19,7 @@ coreview [options] [target]
 coreview              # all local changes vs HEAD
 coreview -p main      # paged review of changes since main
 coreview abc123       # changes since commit
-coreview main..HEAD   # explicit range
+coreview main > r.md  # export review as markdown
 ```
 
 ### Paged Mode (`-p`)
@@ -35,7 +36,7 @@ This allows you to read at your own pace and open referenced files as you go.
 1. Parses git diff into structured hunks with `[hunk:N]` markers
 2. Sends enriched diff to Claude Code (headless mode) with a system prompt
 3. Streams the response, detecting `[[ref:filepath:hunk:N]]` patterns
-4. Expands references inline with colored diff output (+green, -red)
+4. Expands references inline as ANSI-colored diffs (TTY) or markdown code blocks (piped)
 
 ## Requirements
 
@@ -46,7 +47,6 @@ This allows you to read at your own pace and open referenced files as you go.
 
 - The tool is a very alpha experimental vertion
 - Max 4000 diff lines (fails gracefully with suggestions)
-- Terminal output only (HTML/markdown planned)
 
 ## License
 

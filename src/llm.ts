@@ -76,7 +76,9 @@ export function createClaudeCodeProvider(): LLMProvider {
 
       let stderrOutput = ''
       proc.stderr.on('data', (chunk: Buffer) => {
-        stderrOutput += chunk.toString()
+        const text = chunk.toString()
+        stderrOutput += text
+        process.stderr.write(text) // pass through stderr immediately
       })
 
       let buffer = ''

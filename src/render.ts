@@ -8,9 +8,21 @@ const RED = '\x1b[31m'
 const YELLOW = '\x1b[33m'
 
 /**
- * Render hunks with diff coloring to terminal
+ * Render hunks with diff coloring to terminal or markdown
  */
-export function renderHunks(p: { hunks: Hunk[]; file: string }): string {
+export function renderHunks(p: { hunks: Hunk[]; file: string; raw: boolean }): string {
+  if (p.raw) {
+    const lines = [
+      `--- a/${p.file}`,
+      `+++ b/${p.file}`,
+      ...p.hunks.flatMap(h => [
+        h.header,
+        ...h.lines.map(l => (l.type === 'add' ? '+' : l.type === 'delete' ? '-' : ' ') + l.content)
+      ])
+    ]
+    return `\n\`\`\`diff\n${lines.join('\n')}\n\`\`\`\n`
+  }
+
   const parts: string[] = [`\n  ${DIM}── ${p.file} ──${RESET}\n`]
 
   for (const hunk of p.hunks) {
@@ -32,18 +44,20 @@ export function renderHunks(p: { hunks: Hunk[]; file: string }): string {
 /**
  * Render a resolved reference
  */
-export function renderReference(p: { resolved: ResolvedReference }): string {
-  const { resolved } = p
+export function renderReference(p: { resolved: ResolvedReference; raw: boolean }): string {
+  const { resolved, raw } = p
 
   if (resolved.status === 'resolved') {
-    return renderHunks({ hunks: resolved.hunks, file: resolved.file })
+    return renderHunks({ hunks: resolved.hunks, file: resolved.file, raw })
   }
 
   if (resolved.status === 'not_found') {
     const reason = resolved.reason === 'file_not_in_diff'
       ? 'file not in diff'
       : 'hunk not found'
-    return `\n  ${YELLOW}[warning: ${resolved.file} - ${reason}]${RESET}\n`
+    return raw
+      ? `\n> [warning: ${resolved.file} - ${reason}]\n`
+      : `\n  ${YELLOW}[warning: ${resolved.file} - ${reason}]${RESET}\n`
   }
 
   // malformed - render as plain text

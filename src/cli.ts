@@ -12,11 +12,13 @@ const MAX_DIFF_LINES = 4000
 type CliArgs = {
   target: string | null
   paged: boolean
+  raw: boolean
 }
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2)
   let paged = false
+  let rawFlag = false
 
   for (const arg of args) {
     if (arg === '--help' || arg === '-h') {
@@ -26,6 +28,7 @@ Usage: coreview [options] [target]
 
 Options:
   -p          Paged mode - pause after each code reference
+  --raw       Output markdown without colors (auto-enabled when piped)
   -h, --help  Show this help
 
 Target:
@@ -36,16 +39,22 @@ Examples:
   coreview              # review local changes vs HEAD
   coreview -p main      # paged review of changes since main
   coreview abc123       # review changes since commit
-  coreview main..HEAD   # explicit range`)
+  coreview main > r.md  # export review as markdown`)
       process.exit(0)
     }
-    if (arg === '-p') {
-      paged = true
-    }
+    if (arg === '-p') paged = true
+    if (arg === '--raw') rawFlag = true
+  }
+
+  const raw = rawFlag || !process.stdout.isTTY
+
+  if (paged && raw) {
+    console.error('Error: paged mode (-p) is not supported with --raw or when piping output')
+    process.exit(1)
   }
 
   const target = args.find(a => !a.startsWith('-')) ?? null
-  return { target, paged }
+  return { target, paged, raw }
 }
 
 function waitForEnter(p: { files: string[] }): Promise<void> {
@@ -66,19 +75,17 @@ function waitForEnter(p: { files: string[] }): Promise<void> {
   })
 }
 
-function getDiffCommand(target: string | null): string {
-  return target ? `git diff ${target}` : 'git diff HEAD'
-}
-
 async function main() {
-  const { target, paged } = parseArgs()
-  const diffCmd = getDiffCommand(target)
-  console.log('\n±coreview\n');
+  const { target, paged, raw } = parseArgs()
+  const log = (msg: string) => { if (!raw) console.log(msg) }
+  const diffCmd = target ? `git diff ${target}` : 'git diff HEAD'
+
+  log('\n±coreview\n')
 
   // Get raw diff
   let rawDiff: string
   try {
-    rawDiff = execSync(diffCmd, { encoding: 'utf-8', maxBuffer: 50 * 1024 * 1024 })
+    rawDiff = execSync(diffCmd, { encoding: 'utf-8', })
   } catch (e) {
     console.error(`Failed to get diff: ${diffCmd}`)
     process.exit(1)
@@ -89,10 +96,11 @@ async function main() {
     process.exit(0)
   }
 
-  console.log("Parsing the diff...");
+  log('Parsing the diff...')
   // Parse and validate diff
   const diff = parseDiff({ raw: rawDiff })
   const lineCount = countDiffLines({ diff })
+
 
   if (lineCount > MAX_DIFF_LINES) {
     console.error(`Diff too large (${lineCount} lines, max ${MAX_DIFF_LINES}).`)
@@ -109,12 +117,15 @@ async function main() {
   const llm = createClaudeCodeProvider()
   const parser = createStreamParser()
 
-  console.log("Analyzing changes...");
+  log('Analyzing changes...')
   let started = false
+  const reviewHeader = raw
+    ? `# Review of ${target || 'HEAD'}\n\n`
+    : `\nReview of ${target || 'HEAD'}:\n`
 
   function render(token: { type: 'text' | 'ref'; content: string }): string {
     if (token.type === 'text') return token.content
-    return renderReference({ resolved: resolveReference({ ref: token.content, diff }) })
+    return renderReference({ resolved: resolveReference({ ref: token.content, diff }), raw })
   }
 
   const streamArgs = { systemPrompt: SYSTEM_PROMPT, userPrompt: 'Explain this diff:', input: enriched }
@@ -134,7 +145,7 @@ async function main() {
     let sawRef = false
     const build = (async () => {
       for await (const chunk of llm.stream(streamArgs)) {
-        if (!started) { started = true; console.log("\nReview:\n") }
+        if (!started) { started = true; process.stdout.write(reviewHeader) }
         for (const token of parser.push(chunk)) {
           if (token.type === 'ref') {
             sawRef = true
@@ -166,7 +177,7 @@ async function main() {
     await build
   } else {
     for await (const chunk of llm.stream(streamArgs)) {
-      if (!started) { started = true; console.log("\nReview:\n") }
+      if (!started) { started = true; process.stdout.write(reviewHeader) }
       for (const token of parser.push(chunk)) process.stdout.write(render(token))
     }
     for (const token of parser.flush()) process.stdout.write(render(token))
