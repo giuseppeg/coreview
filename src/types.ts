@@ -16,8 +16,13 @@ export type DiffFile = {
 
 export type ParsedDiff = Map<string, DiffFile>
 
+export type LineRange = {
+  start: number
+  end: number
+}
+
 export type ResolvedReference =
-  | { status: 'resolved'; file: string; hunks: Hunk[] }
+  | { status: 'resolved'; file: string; hunks: Hunk[]; lineRange?: LineRange }
   | { status: 'not_found'; file: string; reason: 'file_not_in_diff' | 'hunk_not_found' }
   | { status: 'malformed'; raw: string }
 

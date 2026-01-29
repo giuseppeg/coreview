@@ -79,12 +79,13 @@ export function createStreamParser(): {
 /**
  * Resolve a reference string to hunks from parsed diff
  * Format: filepath:hunk:N or filepath:hunk:N-M or filepath
+ * Optional line range: filepath:hunk:N:L10-25 or filepath:hunk:N:L15
  */
 export function resolveReference(p: { ref: string; diff: ParsedDiff }): ResolvedReference {
   const { ref, diff } = p
 
-  // Parse reference format
-  const hunkMatch = ref.match(/^(.+):hunk:(\d+)(?:-(\d+))?$/)
+  // Parse reference format with optional line range
+  const hunkMatch = ref.match(/^(.+):hunk:(\d+)(?:-(\d+))?(?::L(\d+)(?:-(\d+))?)?$/)
   const fileOnly = !hunkMatch
 
   const filePath = fileOnly ? ref : hunkMatch[1]
@@ -108,6 +109,16 @@ export function resolveReference(p: { ref: string; diff: ParsedDiff }): Resolved
       return { status: 'not_found', file: filePath, reason: 'hunk_not_found' }
     }
     hunks.push(hunk)
+  }
+
+  // Line range only applies to single-hunk refs
+  if (hunkMatch[4] && hunks.length === 1) {
+    const lineStart = parseInt(hunkMatch[4], 10)
+    const lineEnd = hunkMatch[5] ? parseInt(hunkMatch[5], 10) : lineStart
+    // Normalize inverted ranges
+    const start = Math.min(lineStart, lineEnd)
+    const end = Math.max(lineStart, lineEnd)
+    return { status: 'resolved', file: filePath, hunks, lineRange: { start, end } }
   }
 
   return { status: 'resolved', file: filePath, hunks }

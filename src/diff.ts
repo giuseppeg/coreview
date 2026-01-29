@@ -49,7 +49,7 @@ export function parseDiff(p: { raw: string }): ParsedDiff {
 }
 
 /**
- * Enrich diff with [hunk:N] markers for LLM consumption
+ * Enrich diff with [hunk:N] markers and line numbers for LLM consumption
  */
 export function enrichDiff(p: { diff: ParsedDiff }): string {
   const parts: string[] = []
@@ -58,9 +58,11 @@ export function enrichDiff(p: { diff: ParsedDiff }): string {
     parts.push(`── ${path} ──\n`)
     for (const hunk of file.hunks) {
       parts.push(`[hunk:${hunk.index}] ${hunk.header}`)
-      for (const line of hunk.lines) {
+      for (let i = 0; i < hunk.lines.length; i++) {
+        const line = hunk.lines[i]
         const prefix = line.type === 'add' ? '+' : line.type === 'delete' ? '-' : ' '
-        parts.push(prefix + line.content)
+        const lineNum = String(i + 1).padStart(3, ' ')
+        parts.push(`${lineNum}: ${prefix}${line.content}`)
       }
       parts.push('')
     }
