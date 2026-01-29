@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process'
 import * as readline from 'node:readline'
 import { parseDiff, enrichDiff, countDiffLines } from './diff'
 import { createStreamParser, resolveReference } from './stream'
-import { createClaudeCodeProvider, SYSTEM_PROMPT } from './llm'
+import { getProvider, SYSTEM_PROMPT } from './llm'
 import { renderReference } from './render'
 
 const MAX_DIFF_LINES = 4000
@@ -13,23 +13,27 @@ type CliArgs = {
   target: string | null
   paged: boolean
   raw: boolean
+  provider: string
 }
 
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2)
   let paged = false
   let rawFlag = false
+  let provider = 'claude'
 
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
     if (arg === '--help' || arg === '-h') {
       console.log(`coreview - semantic code review tool
 
 Usage: coreview [options] [target]
 
 Options:
-  -p          Paged mode - pause after each code reference
-  --raw       Output markdown without colors (auto-enabled when piped)
-  -h, --help  Show this help
+  -p                Paged mode - pause after each code reference
+  --raw             Output markdown without colors (auto-enabled when piped)
+  --provider <name> LLM provider to use (default: claude)
+  -h, --help        Show this help
 
 Target:
   branch name, commit hash, or commit range (e.g., main..HEAD)
@@ -44,6 +48,9 @@ Examples:
     }
     if (arg === '-p') paged = true
     if (arg === '--raw') rawFlag = true
+    if (arg === '--provider' && args[i + 1]) {
+      provider = args[++i]
+    }
   }
 
   const raw = rawFlag || !process.stdout.isTTY
@@ -53,8 +60,9 @@ Examples:
     process.exit(1)
   }
 
-  const target = args.find(a => !a.startsWith('-')) ?? null
-  return { target, paged, raw }
+  const positional = args.filter((a, i) => !a.startsWith('-') && args[i - 1] !== '--provider')
+  const target = positional[0] ?? null
+  return { target, paged, raw, provider }
 }
 
 function waitForEnter(p: { files: string[] }): Promise<void> {
@@ -76,7 +84,7 @@ function waitForEnter(p: { files: string[] }): Promise<void> {
 }
 
 async function main() {
-  const { target, paged, raw } = parseArgs()
+  const { target, paged, raw, provider } = parseArgs()
   const log = (msg: string) => { if (!raw) console.log(msg) }
   const diffCmd = target ? `git diff ${target}` : 'git diff HEAD'
 
@@ -114,7 +122,7 @@ async function main() {
   const enriched = enrichDiff({ diff })
 
   // Create LLM provider and stream parser
-  const llm = createClaudeCodeProvider()
+  const llm = await getProvider({ name: provider })
   const parser = createStreamParser()
 
   log('Analyzing changes...')

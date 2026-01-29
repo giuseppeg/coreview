@@ -34,6 +34,15 @@ Outputs markdown without ANSI colors. Auto-enabled when stdout is not a TTY (pip
 [[ref:src/api.ts]]             # all hunks in file
 ```
 
+## Providers
+
+LLM providers live in `src/providers/`. Each exports `createProvider({ systemPrompt }): LLMProvider`.
+
+- `src/llm.ts` - SYSTEM_PROMPT + `getProvider({ name })` with dynamic import
+- `src/providers/claude.ts` - Claude Code CLI provider (default)
+
+To add a new provider: create `src/providers/foo.ts`, export `createProvider`. Users select via `--provider foo`.
+
 ## Code Style
 
 - Functional TS, no classes
