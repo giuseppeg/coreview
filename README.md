@@ -46,7 +46,7 @@ This allows you to read at your own pace and open referenced files as you go.
 
 ## Limitations
 
-- The tool is a very alpha experimental vertion
+- The tool is a very alpha experimental version
 - Max 4000 diff lines (fails gracefully with suggestions)
 
 ## License

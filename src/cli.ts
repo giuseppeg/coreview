@@ -9,6 +9,16 @@ import { renderReference } from './render'
 
 const MAX_DIFF_LINES = 4000
 
+function getCommitMessages(p: { target: string | null }): string | null {
+  if (!p.target) return null
+  try {
+    const messages = execSync(`git log --format="- %s" ${p.target}..HEAD`, { encoding: 'utf-8' }).trim()
+    return messages || null
+  } catch {
+    return null
+  }
+}
+
 type CliArgs = {
   target: string | null
   paged: boolean
@@ -136,7 +146,11 @@ async function main() {
     return renderReference({ resolved: resolveReference({ ref: token.content, diff }), raw })
   }
 
-  const streamArgs = { systemPrompt: SYSTEM_PROMPT, userPrompt: 'Explain this diff:', input: enriched }
+  const commitMessages = getCommitMessages({ target })
+  const userPrompt = commitMessages
+    ? `Commit messages:\n${commitMessages}\n\nExplain this diff:`
+    : 'Explain this diff:'
+  const streamArgs = { systemPrompt: SYSTEM_PROMPT, userPrompt, input: enriched }
 
   if (paged) {
     // Paged mode: stream into blocks, pause at ref boundaries

@@ -29,9 +29,10 @@ Outputs markdown without ANSI colors. Auto-enabled when stdout is not a TTY (pip
 ## Reference Format
 
 ```
-[[ref:src/api.ts:hunk:1]]      # specific hunk
-[[ref:src/api.ts:hunk:1-3]]    # hunk range
-[[ref:src/api.ts]]             # all hunks in file
+[[ref:src/api.ts:hunk:1]]         # specific hunk
+[[ref:src/api.ts:hunk:1-3]]       # hunk range
+[[ref:src/api.ts:hunk:1:L10-25]]  # lines 10-25 of hunk (for large hunks)
+[[ref:src/api.ts:hunk:1:L15]]     # single line
 ```
 
 ## Providers
