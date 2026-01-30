@@ -1,6 +1,6 @@
 {
   "name": "coreview",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Semantic code review tool with streaming narrative explanations",
   "author": "Giuseppe Gurgone",
   "license": "SEE LICENSE IN LICENSE.md",
