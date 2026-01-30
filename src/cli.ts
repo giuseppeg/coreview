@@ -6,17 +6,35 @@ import { parseDiff, enrichDiff, countDiffLines } from './diff'
 import { createStreamParser, resolveReference } from './stream'
 import { getProvider, SYSTEM_PROMPT } from './llm'
 import { renderReference } from './render'
+import { parseGitHubPrUrl, fetchPrPatch, parsePatch } from './github'
 
 const MAX_DIFF_LINES = 4000
 
-function getCommitMessages(p: { target: string | null }): string | null {
-  if (!p.target) return null
-  try {
-    const messages = execSync(`git log --format="- %s" ${p.target}..HEAD`, { encoding: 'utf-8' }).trim()
-    return messages || null
-  } catch {
-    return null
+type DiffSource = { rawDiff: string; commitMessages: string | null; label: string }
+
+async function getDiffSource(p: { target: string | null }): Promise<DiffSource> {
+  const prInfo = p.target ? parseGitHubPrUrl(p.target) : null
+
+  if (prInfo) {
+    const patch = await fetchPrPatch({ ...prInfo, token: process.env.GITHUB_TOKEN })
+    const parsed = parsePatch(patch)
+    return {
+      rawDiff: parsed.diff,
+      commitMessages: parsed.commitMessages.length ? parsed.commitMessages.map(m => `- ${m}`).join('\n') : null,
+      label: `${prInfo.org}/${prInfo.repo}#${prInfo.pr}`
+    }
   }
+
+  const diffCmd = p.target ? `git diff ${p.target}` : 'git diff HEAD'
+  const rawDiff = execSync(diffCmd, { encoding: 'utf-8' })
+  let commitMessages: string | null = null
+  if (p.target) {
+    try {
+      const msgs = execSync(`git log --format="- %s" ${p.target}..HEAD`, { encoding: 'utf-8' }).trim()
+      commitMessages = msgs || null
+    } catch { /* ignore */ }
+  }
+  return { rawDiff, commitMessages, label: p.target || 'HEAD' }
 }
 
 type CliArgs = {
@@ -47,13 +65,18 @@ Options:
 
 Target:
   branch name, commit hash, or commit range (e.g., main..HEAD)
+  GitHub PR URL (e.g., https://github.com/org/repo/pull/123)
   Omit to review all local changes (staged + unstaged)
 
 Examples:
-  coreview              # review local changes vs HEAD
-  coreview -p main      # paged review of changes since main
-  coreview abc123       # review changes since commit
-  coreview main > r.md  # export review as markdown`)
+  coreview                                    # review local changes vs HEAD
+  coreview -p main                            # paged review of changes since main
+  coreview abc123                             # review changes since commit
+  coreview https://github.com/org/repo/pull/1 # review a GitHub PR
+  coreview main > r.md                        # export review as markdown
+
+Environment:
+  GITHUB_TOKEN  Auth token for private repos`)
       process.exit(0)
     }
     if (arg === '-p') paged = true
@@ -96,29 +119,25 @@ function waitForEnter(p: { files: string[] }): Promise<void> {
 async function main() {
   const { target, paged, raw, provider } = parseArgs()
   const log = (msg: string) => { if (!raw) console.log(msg) }
-  const diffCmd = target ? `git diff ${target}` : 'git diff HEAD'
 
   log('\n±coreview\n')
 
-  // Get raw diff
-  let rawDiff: string
+  let source: DiffSource
   try {
-    rawDiff = execSync(diffCmd, { encoding: 'utf-8', })
+    source = await getDiffSource({ target })
   } catch (e) {
-    console.error(`Failed to get diff: ${diffCmd}`)
+    console.error((e as Error).message)
     process.exit(1)
   }
 
-  if (!rawDiff.trim()) {
+  if (!source.rawDiff.trim()) {
     console.log('No changes to review.')
     process.exit(0)
   }
 
   log('Parsing the diff...')
-  // Parse and validate diff
-  const diff = parseDiff({ raw: rawDiff })
+  const diff = parseDiff({ raw: source.rawDiff })
   const lineCount = countDiffLines({ diff })
-
 
   if (lineCount > MAX_DIFF_LINES) {
     console.error(`Diff too large (${lineCount} lines, max ${MAX_DIFF_LINES}).`)
@@ -128,27 +147,20 @@ async function main() {
     process.exit(1)
   }
 
-  // Enrich diff for LLM
   const enriched = enrichDiff({ diff })
-
-  // Create LLM provider and stream parser
   const llm = await getProvider({ name: provider })
   const parser = createStreamParser()
 
   log('Analyzing changes...')
   let started = false
-  const reviewHeader = raw
-    ? `# Review of ${target || 'HEAD'}\n\n`
-    : `\nReview of ${target || 'HEAD'}:\n`
+  const reviewHeader = raw ? `# Review of ${source.label}\n\n` : `\nReview of ${source.label}:\n`
 
   function render(token: { type: 'text' | 'ref'; content: string }): string {
     if (token.type === 'text') return token.content
     return renderReference({ resolved: resolveReference({ ref: token.content, diff }), raw })
   }
-
-  const commitMessages = getCommitMessages({ target })
-  const userPrompt = commitMessages
-    ? `Commit messages:\n${commitMessages}\n\nExplain this diff:`
+  const userPrompt = source.commitMessages
+    ? `Commit messages:\n${source.commitMessages}\n\nExplain this diff:`
     : 'Explain this diff:'
   const streamArgs = { systemPrompt: SYSTEM_PROMPT, userPrompt, input: enriched }
 
