@@ -13,15 +13,22 @@ coreview [options] [target]
 - `--raw` Output markdown without colors (auto-enabled when piped)
 - `--provider <name>` LLM provider (default: `claude`)
 
-**Target:** branch name, commit hash, or commit range. Omit to review all local changes (staged + unstaged).
+**Target:**
+- Branch name, commit hash, or commit range (e.g., `main..HEAD`)
+- GitHub PR URL (e.g., `https://github.com/org/repo/pull/123`)
+- Omit to review all local changes (staged + unstaged)
 
 **Examples:**
 ```bash
-coreview              # all local changes vs HEAD
-coreview -p main      # paged review of changes since main
-coreview abc123       # changes since commit
-coreview main > r.md  # export review as markdown
+coreview                                      # all local changes vs HEAD
+coreview -p main                              # paged review of changes since main
+coreview abc123                               # changes since commit
+coreview https://github.com/org/repo/pull/1   # review a GitHub PR
+coreview main > r.md                          # export review as markdown
 ```
+
+**Environment:**
+- `GITHUB_TOKEN` - Auth token for private GitHub repos
 
 ### Paged Mode (`-p`)
 

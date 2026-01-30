@@ -4,9 +4,12 @@ CLI that explains diffs semantically. Parses git diff into numbered hunks, sends
 
 ## Core Flow
 
-1. Parse diff -> `Map<filepath, Hunk[]>` with `[hunk:N]` markers
-2. LLM generates prose with `[[ref:filepath:hunk:N]]` references
-3. Stream parser detects refs, resolver maps to hunks, render (ANSI or markdown)
+1. Get diff (local git or GitHub PR via URL)
+2. Parse diff -> `Map<filepath, Hunk[]>` with `[hunk:N]` markers
+3. LLM generates prose with `[[ref:filepath:hunk:N]]` references
+4. Stream parser detects refs, resolver maps to hunks, render (ANSI or markdown)
+
+Max 4000 diff lines enforced.
 
 ## Paged Mode (`-p`)
 
@@ -34,6 +37,15 @@ Outputs markdown without ANSI colors. Auto-enabled when stdout is not a TTY (pip
 [[ref:src/api.ts:hunk:1:L10-25]]  # lines 10-25 of hunk (for large hunks)
 [[ref:src/api.ts:hunk:1:L15]]     # single line
 ```
+
+## GitHub PR Support
+
+Target can be a GitHub PR URL: `https://github.com/org/repo/pull/123`
+
+- `src/github.ts` - `parseGitHubPrUrl`, `fetchPrPatch`, `parsePatch`
+- Uses patch-diff.githubusercontent.com endpoint
+- `GITHUB_TOKEN` env var for private repos
+- Extracts commit messages from patch for LLM context
 
 ## Providers
 

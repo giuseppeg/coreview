@@ -1,124 +1,67 @@
-# LLM-Guided Multi-Language Code Review Tool — Design Document
+# Coreview Design
 
-## Goal
-Create a tool that produces a **narrative walkthrough** of large PRs/branches in **any programming language**, progressively revealing changes and explaining intent, cheaply and efficiently.
+## Current Implementation
 
-My core idea is that I get the logical diff order and then start a while loop to implement something like git add -p but at each pass I get the current block of snippets and kick in an llm explanation generation. The idea is to simplify reviews with a "walkthrough" process as if I was pairing with another engineer and they would walk me through their changes.
+Single-pass streaming review: parse diff, send to LLM, stream response with inline references.
 
----
-
-## Architecture Overview
-
-### Step 0 — Inputs
-- Git branch / PR
-- Optional base branch for diff comparison
-- Commit history
-
-### Step 1 — Universal Diff Index
-**Purpose:** Build language-agnostic structured metadata from raw diffs.
-
-**Inputs:** `git diff --numstat --name-status -M -C`, optional commit log.
-**Processing:**
-1. **Git metadata**
-   - File paths, change type, line churn, renames
-2. **Hunk metadata**
-   - Size, added/removed lines, comment ratio
-3. **Approximate symbols**
-   - Regex heuristics for functions/classes/blocks
-4. **Dependency hints**
-   - Import/include lines, file references
-5. **Commit mapping**
-   - Attach latest commit hash and message per file/hunk
-
-**Output:** `DiffIndex` (JSON)
-```ts
-interface FileChange {
-  path: string
-  changeType: "A" | "M" | "D" | "R"
-  churn: { add: number; del: number }
-  latestCommit: { hash: string; message: string }
-  hunks: HunkMeta[]
-  approxSymbols: string[]
-  references: string[]
-}
-interface DiffIndex {
-  files: FileChange[]
-  graph: DependencyGraph
-}
+```
+git diff / PR URL
+      |
+      v
+  parseDiff() -> Map<filepath, Hunk[]> with [hunk:N] markers
+      |
+      v
+  enrichDiff() -> text blob for LLM
+      |
+      v
+  LLM stream with SYSTEM_PROMPT
+      |
+      v
+  createStreamParser() detects [[ref:...]] tokens
+      |
+      v
+  resolveReference() + renderReference() -> ANSI or markdown
 ```
 
+### Key Modules
+
+- `cli.ts` - arg parsing, diff source (git or GitHub PR), main loop
+- `diff.ts` - `parseDiff`, `enrichDiff`, `countDiffLines`
+- `stream.ts` - `createStreamParser`, `resolveReference`
+- `render.ts` - `renderReference` (ANSI/markdown output)
+- `llm.ts` - `SYSTEM_PROMPT`, `getProvider`
+- `github.ts` - PR URL parsing, patch fetching
+- `providers/claude.ts` - Claude Code CLI provider
+
+### Modes
+
+- **Default**: stream everything, render refs inline
+- **Paged (`-p`)**: pause after each ref group, show file list, ENTER to continue
+- **Raw (`--raw`)**: markdown output, no ANSI, auto-enabled when piped
+
 ---
 
-### Step 2 — Intent Clustering & Narrative Ordering
-**Purpose:** Convert DiffIndex → ordered review walkthrough.
+## Future Ideas (not implemented and probably bad ideas)
 
-**Processing:**
-1. **Deterministic pre-grouping**
-   - Cluster files by directory, dependency graph, commit, churn
-2. **LLM-assisted intent clustering**
-   - Input: cluster metadata only (paths, symbols, hunks, commits)
-   - Output: `IntentCluster` with title, summary, dependencies
-```ts
-interface IntentCluster {
-  id: string
-  title: string
-  summary: string
-  files: string[]
-  dependsOn: string[]
-  confidence: number
-}
+These were in the original vision but not built:
+
+### Intent Clustering
+Group related changes by intent (feature, bugfix, refactor) using LLM on metadata only. Would enable smarter ordering and summaries.
+
+### Dependency Graph
+Build soft dependency graph from imports/references. Order review by dependencies.
+
+### Interactive Review
+- Approve/reject hunks
+- Leave inline comments
+- TTS read-aloud with `say`
+- Export comments to PR
+
+### Caching
+Store cluster summaries and explanations for incremental reviews.
+
+### Multi-stage Pipeline
 ```
-3. **Dependency resolution**
-   - Build DAG → topological sort → review order
-4. **Review script generation**
-   - Output `ReviewStep[]` with primary and supporting files
-```ts
-interface ReviewStep {
-  clusterId: string
-  intent: string
-  primaryFiles: string[]
-  supportingFiles: string[]
-  rationale: string
-}
+DiffIndex -> IntentClusters -> ReviewSteps -> Progressive Loop
 ```
-
-**Token control:** Cap input size per cluster; drop low-signal fields for large PRs.
-**Fallback:** If LLM uncertain, use directory/commit/churn order.
-
----
-
-### Step 3 — Progressive Review Loop
-- Iterate over `ReviewStep[]` sequentially
-- For each step:
-  1. Extract only relevant hunks/snippets
-  2. Ask LLM to explain intent and cross-references
-  3. Allow interactive “approve/next” workflow
-
----
-
-## Notes & Principles
-- **Language-agnostic:** No AST/parsing or LSP reliance
-- **Cheap & scalable:** LLM only sees metadata + small hunks
-- **Commits are first-class metadata:** drive grouping, intent hints, ordering
-- **Dependency graph:** soft heuristic graph, not exact call graph
-- **Caching:** store cluster summaries and explanations for reuse
-- **The first steps must be headless**: the review part should be decoupled from the core steps such that I can have a terminal UI, or web page UI. For now let's implement only terminal.
-
----
-
-## Technology Stack
-- Node.js / TypeScript
-- Git CLI for diff and log
-- Regex-based symbol extraction
-- Optional lightweight AST parsers (tree-sitter) for additional accuracy (can we skip this for now?)
-- Any LLM with context window ~2–8k tokens for Step 2 & 3
-- We need a thin abstraction for the LLM such that we can later integrate many different. For now we should use claude code in headless mode https://code.claude.com/docs/en/headless with custom system prompt json output
-
----
-
-## Output
-- Structured review plan (`ReviewStep[]`)
-- Narrative walkthrough with explanations for each cluster/hunk
-- Supports iterative, “pair-programming style” review
-- when a diff block is presented it should appear with diff highlight and interactive "prompt" with the default action being leaving a comment (no. Other actions are: read (uses os `say` with ability to press Esc to stop), accept [optional message],
-
+Instead of current single-pass approach.
